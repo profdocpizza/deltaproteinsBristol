@@ -1,0 +1,1 @@
+cd data is in CD_analysis github repo, which was based in wsl on alienware
