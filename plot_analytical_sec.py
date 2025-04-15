@@ -8,7 +8,7 @@ import seaborn as sns
 
 FLOW_RATE_ML_PER_MIN = 0.8
 
-params_df = pd.read_csv("/home/tadas/code/deltaproteinsBristol/experimental_results/deltaprot_designs_data_with_results.csv")[["Well Position","Name","mass"]]
+params_df = pd.read_csv("/home/tadas/code/deltaproteinsBristol/experimental_results/deltaprot_designs_data_with_results.csv")[["Well Position","Name","mass_w_prefix"]]
 
 raw_file_dir = "/home/tadas/code/deltaproteinsBristol/experimental_results/analytical_sec_raw"
 output_dir = "/home/tadas/code/deltaproteinsBristol/experimental_results/analytical_sec_plots"
@@ -22,6 +22,9 @@ for label in params_df["Well Position"].tolist():
     # Load and prepare data
     df = pd.read_csv(path)
     df['Volume_mL'] = df['min'] * FLOW_RATE_ML_PER_MIN
+    df['Intensity'] = df['Intensity'] / df['Intensity'].max()
+    baseline_offset = df['Intensity'].min()  # Compute the minimum intensity as the baseline
+    df['Intensity'] = df['Intensity'] - baseline_offset  # Subtract the baseline
 
     # Peak-based cropping
     max_idx = df['Intensity'].idxmax()
@@ -33,9 +36,12 @@ for label in params_df["Well Position"].tolist():
     sns.lineplot(data=cropped_df, x='Volume_mL', y='Intensity')
     plt.title(f'{label}')
     plt.xlabel('Volume (mL)')
-    plt.ylabel('Intensity')
+    # Absorbance at 230 nm 
+    plt.ylabel('Normalised Absorbance at 230 nm')
     # use dashed grid
-    plt.grid(True, linestyle='--', alpha=0.5)
+    # plt.grid(True, linestyle='--', alpha=0.5)
+    # remove y axis but keep the label
+    plt.gca().yaxis.set_visible(False)
     plt.tight_layout()
 
     # Save plots
@@ -44,9 +50,9 @@ for label in params_df["Well Position"].tolist():
     plt.close()
 
 # make one ovverlapping plot for overlap for A9,A19 and B8
-labels = ['A9', 'A12', 'B8']
+labels = ['A9', 'A12', 'B8','A1','B12','F4']
 
-fig = plt.figure(figsize=(5, 4))
+fig = plt.figure(figsize=(5, 3))
 
 for label in labels:
     path = f"{raw_file_dir}/{label}.csv"
@@ -56,12 +62,18 @@ for label in labels:
 
     # Load and prepare data
     df = pd.read_csv(path)
+    df=df[(df['min'] >= 0.01)]
     df['Volume_mL'] = df['min'] * FLOW_RATE_ML_PER_MIN
+    df['Intensity'] = df['Intensity'] / df['Intensity'].max()
+    baseline_offset = df['Intensity'].min()  # Compute the minimum intensity as the baseline
+    df['Intensity'] = df['Intensity'] - baseline_offset  # Subtract the baseline
+
+
 
     # Peak-based cropping
     max_idx = df['Intensity'].idxmax()
     peak_vol = df.loc[max_idx, 'Volume_mL']
-    cropped_df = df[(df['Volume_mL'] >= peak_vol - 4) & (df['Volume_mL'] <= peak_vol + 4)]
+    cropped_df = df #df[(df['Volume_mL'] >= 8) & (df['Volume_mL'] <= 20)]
 
     # Skip if cropping removes all data
     if cropped_df.empty:
@@ -71,12 +83,12 @@ for label in labels:
     # Plot
     sns.lineplot(data=cropped_df, x='Volume_mL', y='Intensity', label=label)
 
-    # # Annotate the peak with mass
-    # cropped_peak_idx = cropped_df['Intensity'].idxmax()
-    # peak_x = cropped_df.loc[cropped_peak_idx, 'Volume_mL']
-    # peak_y = cropped_df.loc[cropped_peak_idx, 'Intensity']
-    # mass = params_df[params_df["Well Position"] == label]["mass_w_prefix"].iloc[0]
-    # plt.annotate(f"{round(mass)}", xy=(peak_x, peak_y), fontsize=10, ha='center', va='bottom')
+    # Annotate the peak with mass
+    cropped_peak_idx = cropped_df['Intensity'].idxmax()
+    peak_x = cropped_df.loc[cropped_peak_idx, 'Volume_mL']
+    peak_y = cropped_df.loc[cropped_peak_idx, 'Intensity']
+    mass = params_df[params_df["Well Position"] == label]["mass_w_prefix"].iloc[0]
+    plt.annotate(f"{round(mass)}", xy=(peak_x, peak_y), fontsize=5, ha='center', va='bottom')
 
 # use dashed grid
 plt.grid(True, linestyle='--', alpha=0.5)

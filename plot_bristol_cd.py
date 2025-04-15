@@ -1,32 +1,27 @@
 # --- Plotting Dependencies ---
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import seaborn as sns
 import pandas as pd
 from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
-
 import os
 
 from CD_analysis import parse_jasco_cd_file
 
-# --- Constants (Define these based on your experiment) ---
-DEFAULT_PROTEIN_CONCENTRATION_UM = 18
-DEFAULT_PATH_LENGTH_MM = 1.0 # Match the filenames (1mm)
-DEFAULT_NUM_RESIDUES = 33   # Replace with your protein's residue count
-
 # --- Calculation Functions ---
-def get_mean_residue_ellipticity(protein_concentration_uM=DEFAULT_PROTEIN_CONCENTRATION_UM,
-                                 path_length_mm=DEFAULT_PATH_LENGTH_MM,
-                                 num_residues=DEFAULT_NUM_RESIDUES):
-    """Calculates the conversion factor from mdeg to MRE (deg·cm²·dmol⁻¹)."""
+def get_mean_residue_ellipticity(protein_concentration_uM,
+                                 path_length_mm,
+                                 num_residues):
+    """
+    Calculates the conversion factor from mdeg to Mean Residue Ellipticity (MRE; deg·cm²·dmol⁻¹)
+    using the formula: factor = 1/(10 * (path_length_cm) * (concentration_M) * num_residues).
+    """
     if not all([protein_concentration_uM, path_length_mm, num_residues]):
-         raise ValueError("Missing one or more parameters for MRE calculation: concentration, path length, num residues")
+        raise ValueError("Missing one or more parameters for MRE calculation: concentration, path length, num residues")
     path_length_cm = path_length_mm / 10.0  # Convert mm to cm
     concentration_M = protein_concentration_uM * 1e-6  # Convert µM to M
-    # Formula for MRE = (mdeg * MW) / (10 * pathlength_cm * concentration_g_L)
-    # Or MRE = mdeg / (10 * pathlength_cm * concentration_M * num_residues)
-    # We return the factor to multiply mdeg by.
     denominator = (10.0 * path_length_cm * concentration_M * num_residues)
     if denominator == 0:
         raise ValueError("MRE calculation denominator is zero. Check concentration, path length, and num residues.")
@@ -34,179 +29,103 @@ def get_mean_residue_ellipticity(protein_concentration_uM=DEFAULT_PROTEIN_CONCEN
 
 def interpolate_and_smooth_data(x_values, y_values, new_x_grid=None, window_length=7, polyorder=2):
     """
-    Interpolate and smooth Y data based on X data.
-
-    Parameters:
-    - x_values: NumPy array of original x values.
-    - y_values: NumPy array of original y values.
-    - new_x_grid: NumPy array of new x values for interpolation. If None, creates a default grid.
-    - window_length: The length of the filter window for smoothing.
-    - polyorder: The order of the polynomial used to fit the samples.
-
-    Returns:
-    - new_x_grid: The x grid used for interpolation.
-    - smoothed_y_values: The interpolated and smoothed Y values.
+    Interpolates and smooths y_values based on x_values.
+    Returns the new x grid and the smoothed y values.
     """
-    # Ensure inputs are numpy arrays
     x_values = np.asarray(x_values)
     y_values = np.asarray(y_values)
-
-    # Handle decreasing X values (like wavelength scans) for interpolation
     sort_indices = np.argsort(x_values)
     x_sorted = x_values[sort_indices]
     y_sorted = y_values[sort_indices]
 
-    # If no new x grid is provided, create one based on sorted data
     if new_x_grid is None:
         new_x_grid = np.linspace(x_sorted.min(), x_sorted.max(), num=500)
     else:
         new_x_grid = np.asarray(new_x_grid)
-        new_x_grid.sort() # Ensure the new grid is sorted
+        new_x_grid.sort()
 
-    # Interpolate the data onto the new grid
-    # Use bounds_error=False and fill_value="extrapolate" cautiously if needed,
-    # or ensure new_x_grid is within the bounds of x_sorted.
     try:
-        interpolation_function = interp1d(x_sorted, y_sorted, kind='cubic', bounds_error=False, fill_value=np.nan)
-        interpolated_y_values = interpolation_function(new_x_grid)
+        interp_func = interp1d(x_sorted, y_sorted, kind='cubic', bounds_error=False, fill_value=np.nan)
+        interp_y = interp_func(new_x_grid)
     except ValueError as e:
-         print(f"Interpolation failed: {e}. Check data range and new_x_grid.")
-         # Fallback to linear or handle differently?
-         interpolation_function = interp1d(x_sorted, y_sorted, kind='linear', bounds_error=False, fill_value=np.nan)
-         interpolated_y_values = interpolation_function(new_x_grid)
+        print(f"Interpolation failed: {e}. Using linear interpolation instead.")
+        interp_func = interp1d(x_sorted, y_sorted, kind='linear', bounds_error=False, fill_value=np.nan)
+        interp_y = interp_func(new_x_grid)
 
-
-    # Apply Savitzky-Golay filter to the interpolated data
-    # Handle potential NaNs from extrapolation before smoothing
-    valid_indices = ~np.isnan(interpolated_y_values)
-    if not np.any(valid_indices):
+    valid = ~np.isnan(interp_y)
+    if not np.any(valid):
         print("Warning: All interpolated values are NaN. Smoothing cannot be applied.")
-        return new_x_grid, interpolated_y_values # Return NaNs
+        return new_x_grid, interp_y
 
-    interp_y_valid = interpolated_y_values[valid_indices]
-    smoothed_y_values_valid = interp_y_valid # Default if smoothing fails
-
-    if len(interp_y_valid) > polyorder and len(interp_y_valid) > window_length:
-        # Ensure window_length is odd and less than data length
+    valid_y = interp_y[valid]
+    smoothed_valid = valid_y
+    if len(valid_y) > polyorder and len(valid_y) > window_length:
         if window_length % 2 == 0:
             window_length += 1
-        window_length = min(window_length, len(interp_y_valid) - (1 if len(interp_y_valid) % 2 == 0 else 0)) # Ensure less than length and odd
+        window_length = min(window_length, len(valid_y) - (1 if len(valid_y) % 2 == 0 else 0))
         if window_length > polyorder:
-             try:
-                smoothed_y_values_valid = savgol_filter(interp_y_valid, window_length, polyorder)
-             except ValueError as e:
-                 print(f"Warning: Savgol filter failed: {e}. Returning interpolated data.")
+            try:
+                smoothed_valid = savgol_filter(valid_y, window_length, polyorder)
+            except ValueError as e:
+                print(f"Warning: Savgol filter failed: {e}. Returning interpolated data.")
         else:
-             print(f"Warning: window_length ({window_length}) must be greater than polyorder ({polyorder}). Skipping smoothing.")
+            print(f"Warning: window_length ({window_length}) must be greater than polyorder ({polyorder}). Skipping smoothing.")
     else:
-        print(f"Warning: Not enough data points ({len(interp_y_valid)}) for smoothing with window {window_length} and polyorder {polyorder}. Skipping smoothing.")
+        print(f"Warning: Not enough data points ({len(valid_y)}) for smoothing. Skipping smoothing.")
 
-    # Place smoothed values back into the original array structure with NaNs
-    smoothed_y_values = np.full_like(interpolated_y_values, np.nan)
-    smoothed_y_values[valid_indices] = smoothed_y_values_valid
+    smoothed_y = np.full_like(interp_y, np.nan)
+    smoothed_y[valid] = smoothed_valid
+    return new_x_grid, smoothed_y
 
-    return new_x_grid, smoothed_y_values
-
-# --- Plotting Functions (Adapted) ---
-
+# --- Plotting Functions ---
 def plot_cd_spectra(cd_data_df, sample_name,
-                    protein_concentration_uM=DEFAULT_PROTEIN_CONCENTRATION_UM,
-                    path_length_mm=DEFAULT_PATH_LENGTH_MM,
-                    num_residues=DEFAULT_NUM_RESIDUES,
+                    protein_concentration_uM,
+                    path_length_mm,
+                    num_residues,
                     overlay_df=None, overlay_label="Overlay",
                     title="Circular Dichroism Spectrum", save_dir=".",
                     smooth_window=7, smooth_polyorder=2,
-                    x_limits=(190, 260), y_limits_mre=None): # y_limits in MRE units
+                    x_limits=(190, 260), y_limits_mre=None):
     """
-    Plots CD spectra (Wavelength vs MRE), optionally with an overlay.
-
-    Args:
-        cd_data_df (pd.DataFrame): DataFrame with 'Wavelength_nm' and 'CD_mdeg' columns.
-        sample_name (str): Name of the primary sample.
-        protein_concentration_uM (float): Protein concentration in µM.
-        path_length_mm (float): Cuvette path length in mm.
-        num_residues (int): Number of residues in the protein.
-        overlay_df (pd.DataFrame, optional): DataFrame for overlay spectrum. Defaults to None.
-        overlay_label (str, optional): Label for the overlay spectrum. Defaults to "Overlay".
-        title (str, optional): Plot title base. Defaults to "Circular Dichroism Spectrum".
-        save_dir (str, optional): Directory to save plots. Defaults to ".".
-        smooth_window (int): Savgol filter window length.
-        smooth_polyorder (int): Savgol filter polynomial order.
-        x_limits (tuple): Wavelength range for plotting.
-        y_limits_mre (tuple, optional): Y-axis limits in MRE units. Auto-scaled if None.
+    Plots a CD spectrum (wavelength vs MRE) for a primary data set, with an optional overlay.
     """
     os.makedirs(save_dir, exist_ok=True)
-
-    # Check required columns
     required_cols = ['Wavelength_nm', 'CD_mdeg']
-    if not all(col in cd_data_df.columns for col in required_cols):
-         raise ValueError(f"Main DataFrame missing required columns: {required_cols}")
-    if overlay_df is not None and not all(col in overlay_df.columns for col in required_cols):
-         raise ValueError(f"Overlay DataFrame missing required columns: {required_cols}")
+    for df in [cd_data_df] + ([overlay_df] if overlay_df is not None else []):
+        if not all(col in df.columns for col in required_cols):
+            raise ValueError(f"DataFrame missing required columns: {required_cols}")
 
-    # --- Process Primary Data ---
     mre_factor = get_mean_residue_ellipticity(protein_concentration_uM, path_length_mm, num_residues)
-
-    # Interpolate and smooth the CD data
     wavelengths = cd_data_df['Wavelength_nm'].values
     cd_values = cd_data_df['CD_mdeg'].values
-    new_wavelength_grid, smoothed_cd_values = interpolate_and_smooth_data(
-        wavelengths, cd_values, window_length=smooth_window, polyorder=smooth_polyorder
-    )
-
-    # Calculate MRE for smoothed data
-    smoothed_mre = smoothed_cd_values * mre_factor
-
-    # Create a DataFrame for smoothed data
-    smoothed_cd_df = pd.DataFrame({
-        'Wavelength_nm': new_wavelength_grid,
+    new_wave, smooth_cd = interpolate_and_smooth_data(wavelengths, cd_values, window_length=smooth_window, polyorder=smooth_polyorder)
+    smoothed_mre = smooth_cd * mre_factor
+    smooth_df = pd.DataFrame({
+        'Wavelength_nm': new_wave,
         'Smoothed_MRE_deg_cm2_dmol': smoothed_mre
     })
 
-    # --- Process Overlay Data (if provided) ---
-    smoothed_overlay_df = None
+    overlay_smooth_df = None
     if overlay_df is not None:
-        overlay_wavelengths = overlay_df['Wavelength_nm'].values
-        overlay_cd_values = overlay_df['CD_mdeg'].values
-        # Use the same new grid for consistency
-        overlay_new_grid, overlay_smoothed_cd = interpolate_and_smooth_data(
-            overlay_wavelengths, overlay_cd_values, new_x_grid=new_wavelength_grid,
-            window_length=smooth_window, polyorder=smooth_polyorder
-        )
-        overlay_smoothed_mre = overlay_smoothed_cd * mre_factor
-        smoothed_overlay_df = pd.DataFrame({
-            'Wavelength_nm': overlay_new_grid, # Should be same as new_wavelength_grid
-            'Smoothed_MRE_deg_cm2_dmol': overlay_smoothed_mre
+        overlay_wave = overlay_df['Wavelength_nm'].values
+        overlay_vals = overlay_df['CD_mdeg'].values
+        new_wave_overlay, smooth_overlay = interpolate_and_smooth_data(overlay_wave, overlay_vals, new_x_grid=new_wave,
+                                                                       window_length=smooth_window, polyorder=smooth_polyorder)
+        overlay_smooth_df = pd.DataFrame({
+            'Wavelength_nm': new_wave_overlay,
+            'Smoothed_MRE_deg_cm2_dmol': smooth_overlay * mre_factor
         })
+    colorblind = sns.color_palette("colorblind")
+    grey_color = colorblind[7]  # Red-ish
+    red_color = colorblind[3]  # Blue-ish
 
-    # --- Plotting ---
-    plt.figure(figsize=(5,4))
-    sns.set_style("ticks") # or "whitegrid"
-
-    # Plot the smoothed primary data
-    primary_plot_data = smoothed_cd_df.dropna() # Drop NaNs that might result from interpolation/smoothing edges
-    sns.lineplot(
-        data=primary_plot_data,
-        x='Wavelength_nm',
-        y='Smoothed_MRE_deg_cm2_dmol',
-        linewidth=1.5, # Slightly thicker line
-        label=f'{sample_name}'
-    )
-
-    # Plot the smoothed overlay data
-    if smoothed_overlay_df is not None:
-        overlay_plot_data = smoothed_overlay_df.dropna()
-        sns.lineplot(
-            data=overlay_plot_data,
-            x='Wavelength_nm',
-            y='Smoothed_MRE_deg_cm2_dmol',
-            color='black',
-            linestyle='--', # Dashed line for overlay
-            label=f'{overlay_label}',
-            linewidth=1.5,
-        )
-
-    # Customize the plot
+    plt.figure(figsize=(5, 4))
+    sns.set_style("ticks")
+    sns.lineplot(data=smooth_df.dropna(), x='Wavelength_nm', y='Smoothed_MRE_deg_cm2_dmol',
+                 linewidth=1.5, label=f'{sample_name} Pre-Melt', color="black")
+    if overlay_smooth_df is not None:
+        sns.lineplot(data=overlay_smooth_df.dropna(), x='Wavelength_nm', y='Smoothed_MRE_deg_cm2_dmol',
+                     color=red_color, linestyle='--', linewidth=1.5, label=f'{overlay_label}')
     full_title = f"{title}\n{sample_name}" + (f" vs {overlay_label}" if overlay_df is not None else "")
     plt.title(full_title, fontsize=14)
     plt.xlabel('Wavelength (nm)', fontsize=12)
@@ -214,86 +133,55 @@ def plot_cd_spectra(cd_data_df, sample_name,
     plt.xlim(x_limits)
     if y_limits_mre:
         plt.ylim(y_limits_mre)
+    plt.axhline(0, color='grey', linestyle='-', linewidth=0.5)
     plt.grid(True, linestyle=':', alpha=0.6)
     plt.legend(title='Sample', loc='best', fontsize=10)
-    # Add horizontal line at 0
-    plt.axhline(0, color='grey', linestyle='-', linewidth=0.5)
-
-    # Save the plot
     filename_base = f"cd_spectrum_{sample_name.replace(' ', '_')}"
     if overlay_df is not None:
-        filename_base += "_vs_" + overlay_label.replace(' ', '_')
+        filename_base += f"_vs_{overlay_label.replace(' ', '_')}"
     for ext in ["png", "svg"]:
         plt.savefig(os.path.join(save_dir, f"{filename_base}.{ext}"), dpi=300, bbox_inches="tight")
-
     plt.tight_layout()
-    # plt.show()
 
-
-def plot_melting_curve(melt_data_df, sample_name, wavelength_nm=222, # Common wavelength for melts
-                      protein_concentration_uM=DEFAULT_PROTEIN_CONCENTRATION_UM,
-                      path_length_mm=DEFAULT_PATH_LENGTH_MM,
-                      num_residues=DEFAULT_NUM_RESIDUES,
-                      reverse_melt_df=None, reverse_label="Cooling", # For hysteresis
-                      title="Thermal Melting Curve", save_dir=".",
-                      y_limits_mre=None,x_limits=None): # y_limits in MRE units
+def plot_melting_curve(melt_data_df, sample_name, protein_concentration_uM,
+                       path_length_mm,
+                       num_residues, wavelength_nm=222,
+                       reverse_melt_df=None, reverse_label="Cooling",
+                       title="Thermal Melting Curve", save_dir=".",
+                       y_limits_mre=None, x_limits=None):
     """
-    Plots a thermal melting curve (Temperature vs MRE).
-
-    Args:
-        melt_data_df (pd.DataFrame): DataFrame with 'Temperature_C' and 'CD_mdeg' columns.
-        sample_name (str): Name of the sample.
-        wavelength_nm (int/float): Wavelength at which the melt was monitored (for title/info).
-        protein_concentration_uM (float): Protein concentration in µM.
-        path_length_mm (float): Cuvette path length in mm.
-        num_residues (int): Number of residues in the protein.
-        reverse_melt_df (pd.DataFrame, optional): DataFrame for the reverse (cooling) melt.
-        reverse_label (str): Label for the reverse melt curve.
-        title (str, optional): Plot title base. Defaults to "Thermal Melting Curve".
-        save_dir (str, optional): Directory to save plots. Defaults to ".".
-        y_limits_mre (tuple, optional): Y-axis limits in MRE units. Auto-scaled if None.
+    Plots a thermal melting curve (Temperature vs MRE) for heating, and optionally cooling (reverse) data.
     """
     os.makedirs(save_dir, exist_ok=True)
-
-     # Check required columns
     required_cols = ['Temperature_C', 'CD_mdeg']
-    if not all(col in melt_data_df.columns for col in required_cols):
-         raise ValueError(f"Main melt DataFrame missing required columns: {required_cols}")
-    if reverse_melt_df is not None and not all(col in reverse_melt_df.columns for col in required_cols):
-         raise ValueError(f"Reverse melt DataFrame missing required columns: {required_cols}")
+    for df in [melt_data_df] + ([reverse_melt_df] if reverse_melt_df is not None else []):
+        if not all(col in df.columns for col in required_cols):
+            raise ValueError(f"DataFrame missing required columns: {required_cols}")
 
     mre_factor = get_mean_residue_ellipticity(protein_concentration_uM, path_length_mm, num_residues)
-
-    # Prepare primary melt data
-    melt_data = melt_data_df.copy() # Avoid modifying original df
+    melt_data = melt_data_df.copy()
     melt_data['MRE_deg_cm2_dmol'] = melt_data['CD_mdeg'] * mre_factor
-    # Sort by temperature for plotting
     melt_data = melt_data.sort_values(by='Temperature_C').dropna(subset=['MRE_deg_cm2_dmol'])
 
-    # Prepare reverse melt data (if provided)
     reverse_data = None
     if reverse_melt_df is not None:
         reverse_data = reverse_melt_df.copy()
         reverse_data['MRE_deg_cm2_dmol'] = reverse_data['CD_mdeg'] * mre_factor
         reverse_data = reverse_data.sort_values(by='Temperature_C').dropna(subset=['MRE_deg_cm2_dmol'])
 
-
-    # Set up the plot
-    plt.figure(figsize=(5,4)) # Slightly different aspect ratio might be good
+    plt.figure(figsize=(5, 4))
     sns.set_style("ticks")
+    # Use seaborn's coolwarm palette
+    colorblind = sns.color_palette("colorblind")
+    heat_color = colorblind[3]  # Red-ish
+    cool_color = colorblind[0]  # Blue-ish
 
-    # Plot the primary melting curve (Heating)
     sns.lineplot(data=melt_data, x='Temperature_C', y='MRE_deg_cm2_dmol',
-                 marker='o', linewidth=1.5, markersize=5, label=f'{sample_name} (Heating)')
-
-    # Plot the reverse melting curve (Cooling)
+                 linewidth=1.5, label=f'{sample_name} (Heating)', color=heat_color)
     if reverse_data is not None:
-         sns.lineplot(data=reverse_data, x='Temperature_C', y='MRE_deg_cm2_dmol',
-                      marker='s', linewidth=1.5, markersize=5, linestyle='--', color='grey',
-                      label=f'{sample_name} ({reverse_label})')
-
-
-    # Customize the plot
+        sns.lineplot(data=reverse_data, x='Temperature_C', y='MRE_deg_cm2_dmol',
+                     linewidth=1.5, linestyle='--',
+                     label=f'{sample_name} ({reverse_label})',color = cool_color)
     full_title = f"{title} at {wavelength_nm} nm\n{sample_name}"
     plt.title(full_title, fontsize=14)
     plt.xlabel('Temperature (°C)', fontsize=12)
@@ -301,144 +189,183 @@ def plot_melting_curve(melt_data_df, sample_name, wavelength_nm=222, # Common wa
     if y_limits_mre:
         plt.ylim(y_limits_mre)
     else:
-        # Auto-adjust y-limits slightly if not specified
-        all_mre_values = melt_data['MRE_deg_cm2_dmol']
+        all_mre = melt_data['MRE_deg_cm2_dmol']
         if reverse_data is not None:
-            all_mre_values = pd.concat([all_mre_values, reverse_data['MRE_deg_cm2_dmol']])
-        if not all_mre_values.empty:
-            min_y, max_y = all_mre_values.min(), all_mre_values.max()
-            padding = (max_y - min_y) * 0.05 # 5% padding
-            plt.ylim(min_y - padding, max_y + padding)
-
+            all_mre = pd.concat([all_mre, reverse_data['MRE_deg_cm2_dmol']])
+        if not all_mre.empty:
+            pad = (all_mre.max() - all_mre.min()) * 0.05
+            plt.ylim(all_mre.min() - pad, all_mre.max() + pad)
     plt.grid(True, linestyle=':', alpha=0.6)
-    plt.legend(loc='best', fontsize=10)
-    plt.tight_layout()
+    # plt.legend(loc='best', fontsize=10)
 
-    # Save the plot
+    # Custom legend with arrows in the line icons
+    custom_lines = [
+        Line2D([0, 1], [0, 0], color=heat_color, lw=2, linestyle='-', marker='>', markersize=8, markevery=[1]),
+        Line2D([0, 1], [0, 0], color=cool_color, lw=2, linestyle='--', marker='<', markersize=8, markevery=[0])
+    ]
+
+    plt.legend(custom_lines, ['Heating', 'Cooling'],
+            loc='best', fontsize=10)
+    plt.tight_layout()
     filename_base = f"melting_curve_{sample_name.replace(' ', '_')}_{wavelength_nm}nm"
     if reverse_data is not None:
         filename_base += "_hysteresis"
     for ext in ["png", "svg"]:
         plt.savefig(os.path.join(save_dir, f"{filename_base}.{ext}"), dpi=300, bbox_inches="tight")
 
-    # plt.show()
+# --- Helper Functions for Processing ---
+def subtract_blank_from_sample(parsed_data, key, blank_df):
+    """
+    Subtracts the blank CD (or melt) data from the sample data if the x-axis (wavelength or temperature) matches.
+    Stores the result under a new key with '_Subtracted' appended.
+    """
+    if key in parsed_data and 'data' in parsed_data[key]:
+        sample_df = parsed_data[key]['data']
+        if sample_df.columns[0] == blank_df.columns[0] and \
+           len(sample_df) == len(blank_df) and \
+           np.allclose(sample_df.iloc[:, 0], blank_df.iloc[:, 0]):
+            y_col = sample_df.columns[1]
+            subtracted = sample_df.copy()
+            subtracted[y_col] = sample_df[y_col] - blank_df[y_col]
+            parsed_data[f"{key}_Subtracted"] = {'meta': parsed_data[key]['meta'], 'data': subtracted}
+        else:
+            print(f"Warning: X-axis mismatch or unequal lengths for {key}. Skipping blank subtraction for this file.")
+    else:
+        print(f"Warning: {key} not found in parsed data.")
 
-
-
+def process_sample(sample, params_df, parsed_data, params, blank_df):
+    """
+    Processes a sample by performing blank subtraction on its pre-melt and post-melt files,
+    then plotting both the CD spectrum overlay and the 222 nm melting curve.
+    """
+    pre_key = sample
+    post_key = f"{sample}_post_melt"
+    melt_key = f"{sample}_melt"
+    remelt_key = f"{sample}_remelt"
+    
+    # Subtract blank from pre- and post-melt files
+    subtract_blank_from_sample(parsed_data, pre_key, blank_df)
+    subtract_blank_from_sample(parsed_data, post_key, blank_df)
+    
+    try:
+        conc = params_df.loc[sample, "cd_sample_molar_conc"] * 1e6
+        seq_len = params_df.loc[sample, "sequence_length"]
+        path_len = params_df.loc[sample, "cd_path_length_mm"]
+    except KeyError:
+        print(f"Parameters not found for sample {sample}. Skipping.")
+        return
+    
+    pre_sub_key = f"{pre_key}_Subtracted"
+    post_sub_key = f"{post_key}_Subtracted"
+    
+    if pre_sub_key in parsed_data and post_sub_key in parsed_data:
+        plot_cd_spectra(parsed_data[pre_sub_key]['data'],
+                        sample_name=f"Sample {sample}",
+                        overlay_df=parsed_data[post_sub_key]['data'],
+                        overlay_label=f"{sample} Post-Melt",
+                        protein_concentration_uM=conc,
+                        num_residues=seq_len,
+                        path_length_mm=path_len,
+                        **params)
+    else:
+        print(f"Missing subtracted data for pre- or post-melt for sample {sample}.")
+    
+    # Plot the melting curve at 222 nm (heating and optionally cooling)
+    if melt_key in parsed_data:
+        if remelt_key in parsed_data:
+            plot_melting_curve(parsed_data[melt_key]['data'],
+                               sample_name=f"Sample {sample}",
+                               reverse_melt_df=parsed_data[remelt_key]['data'],
+                               reverse_label="Cooling",
+                               wavelength_nm=222,
+                               protein_concentration_uM=conc,
+                               path_length_mm=path_len,
+                               num_residues=seq_len,
+                               **params)
+        else:
+            plot_melting_curve(parsed_data[melt_key]['data'],
+                               sample_name=f"Sample {sample}",
+                               wavelength_nm=222,
+                               protein_concentration_uM=conc,
+                               path_length_mm=path_len,
+                               num_residues=seq_len,
+                               **params)
+    else:
+        print(f"Missing melt data for sample {sample}.")
 
 # --- Main Execution ---
 if __name__ == "__main__":
+    # Define data directories (adjust these paths as needed)
+    data_dir = "/home/tadas/code/deltaproteinsBristol/experimental_results/bristol_cd_raw"
+    output_dir = "/home/tadas/code/deltaproteinsBristol/experimental_results/bristol_cd_plots"
 
-    # Define the directory containing the data files
-    # IMPORTANT: Replace with the actual path to your files
-    data_dir = "/home/tadas/code/single_chain_dp_bristol/experimental_results/bristol_cd_raw" 
-    output_dir = "/home/tadas/code/single_chain_dp_bristol/experimental_results/bristol_cd_plots"
-    # os.makedirs(output_dir, exist_ok=True)
-
-    # --- Define Experimental Parameters ---
-    # These might vary per sample, adjust as needed
-    params_df = pd.read_csv("/home/tadas/code/single_chain_dp_bristol/experimental_results/deltaprot_designs_data_with_results.csv")[["Well Position","cd_path_length_mm",
- "cd_sample_molar_conc","sequence_length"]]
-    # set Well Position as index
+    # Load experimental parameters
+    params_df = pd.read_csv("/home/tadas/code/deltaproteinsBristol/experimental_results/deltaprot_designs_data_with_results.csv")[
+        ["Well Position", "cd_path_length_mm", "cd_sample_molar_conc", "sequence_length"]
+    ]
     params_df.set_index("Well Position", inplace=True)
-
-    # show cd_path_length_mm of "B2" well position 
+    
+    # Common plotting parameters
     params = {
-        "y_limits_mre":(-40000, 0),
-        "x_limits":(200, 260),
+        "y_limits_mre": (-40000, 0),
+        "x_limits": (200, 260),
         "save_dir": output_dir
     }
-
-    # --- Define Files ---
+    
+    # Define file names for all samples
     files = {
         "Blank": "20250404_1mm_BP-Buffer_blank.txt",
         "A9": "20250404_1mm_BP-Buffer_A9.txt",
+        "A9_melt": "20250404_1mm_BP-Buffer_A9_melt.txt",
+        "A9_remelt": "20250404_1mm_BP-Buffer_A9_melt@.txt",
+        "A9_post_melt": "20250404_1mm_BP-Buffer_A9_post_melt.txt",
         "A12": "20250404_1mm_BP-Buffer_A12.txt",
+        "A12_melt": "20250404_1mm_BP-Buffer_A12_melt.txt",
+        "A12_remelt": "20250404_1mm_BP-Buffer_A12_melt@.txt",
+        "A12_post_melt": "20250404_1mm_BP-Buffer_A12_post_melt.txt",
         "B8": "20250404_1mm_BP-Buffer_B8.txt",
         "B8_melt": "20250404_1mm_BP-Buffer_B8_melt.txt",
-        "B8_remelt": "20250404_1mm_BP-Buffer_B8_melt@.txt", # Cooling curve
-        "B8_post_melt": "20250404_1mm_BP-Buffer_B8_post_melt.txt"
+        "B8_remelt": "20250404_1mm_BP-Buffer_B8_melt@.txt",
+        "B8_post_melt": "20250404_1mm_BP-Buffer_B8_post_melt.txt",
+        "A1": "20250404_1mm_BP-Buffer_A1.txt",
+        "A1_melt": "20250404_1mm_BP-Buffer_A1_melt.txt",
+        "A1_remelt": "20250404_1mm_BP-Buffer_A1_melt@.txt",
+        "A1_post_melt": "20250404_1mm_BP-Buffer_A1_post_melt.txt",
+        "B12": "20250404_1mm_BP-Buffer_B12.txt",
+        "B12_melt": "20250404_1mm_BP-Buffer_B12_melt.txt",
+        "B12_remelt": "20250404_1mm_BP-Buffer_B12_melt@.txt",
+        "B12_post_melt": "20250404_1mm_BP-Buffer_B12_post_melt.txt",
+        "F4": "20250404_1mm_BP-Buffer_F4.txt",
+        "F4_melt": "20250404_1mm_BP-Buffer_F4_melt.txt",
+        "F4_remelt": "20250404_1mm_BP-Buffer_F4_melt@.txt",
+        "F4_post_melt": "20250404_1mm_BP-Buffer_F4_post_melt.txt",
     }
-
-    # --- Parse Files ---
+    
+    # Parse all files
     parsed_data = {}
-    for name, filename in files.items():
-        filepath = os.path.join(data_dir, filename)
+    for key, fname in files.items():
+        fpath = os.path.join(data_dir, fname)
         try:
-            print(f"Parsing {name}: {filename}...")
-            metadata, df = parse_jasco_cd_file(filepath)
-            parsed_data[name] = {'meta': metadata, 'data': df}
+            print(f"Parsing {key}: {fname}...")
+            metadata, df = parse_jasco_cd_file(fpath)
+            parsed_data[key] = {'meta': metadata, 'data': df}
             print(f"  -> Found {len(df)} data points. X-axis: {df.columns[0]}")
-            # print(df.head(2)) # Optional: print head for verification
         except FileNotFoundError:
-            print(f"  -> File not found. Skipping.")
+            print(f"  -> File not found: {fname}. Skipping {key}.")
         except ValueError as e:
-            print(f"  -> Error parsing file: {e}. Skipping.")
+            print(f"  -> Error parsing {fname}: {e}. Skipping {key}.")
         print("-" * 20)
-
-    # --- Basic Data Subtraction (Example: Subtract Blank from Samples) ---
+    
+    # Ensure blank file is available for subtraction
     if "Blank" in parsed_data and 'data' in parsed_data["Blank"]:
         blank_df = parsed_data["Blank"]['data']
-        # Ensure blank has same wavelengths/temperatures for simple subtraction
-        # More robust subtraction might require interpolation
-
-        for name in ["A9", "A12", "B8", "B8_post_melt"]:
-             if name in parsed_data and 'data' in parsed_data[name]:
-                sample_df = parsed_data[name]['data']
-                # Check if x-axes match (simple check)
-                if sample_df.columns[0] == blank_df.columns[0] and \
-                   len(sample_df) == len(blank_df) and \
-                   np.allclose(sample_df.iloc[:, 0], blank_df.iloc[:, 0]):
-
-                    y_col_name = sample_df.columns[1] # e.g., 'CD_mdeg'
-                    print(f"Subtracting Blank from {name}...")
-                    # Create a new DataFrame for subtracted data
-                    subtracted_df = sample_df.copy()
-                    subtracted_df[y_col_name] = sample_df[y_col_name] - blank_df[y_col_name]
-                    # Store it back, maybe with a new key or overwrite
-                    parsed_data[f"{name}_Subtracted"] = {'meta': parsed_data[name]['meta'], 'data': subtracted_df}
-                    print("   -> Subtraction complete.")
-                else:
-                    print(f"Warning: Cannot directly subtract Blank from {name}. X-axes differ or lengths mismatch. Skipping subtraction.")
-                    # Add interpolation logic here if needed for robust subtraction
-                    parsed_data[f"{name}_Subtracted"] = parsed_data[name] # Keep original if subtraction fails
-
-
-    # --- Generate Plots ---
-
-    # Plot individual (subtracted) spectra
-
-
-    if "A9_Subtracted" in parsed_data:
-        plot_cd_spectra(parsed_data["A9_Subtracted"]['data'], sample_name="Sample A9",
-                protein_concentration_uM=params_df.loc["A9", "cd_sample_molar_conc"]*10**6, num_residues=params_df.loc["A9", "sequence_length"], path_length_mm=params_df.loc["A9", "cd_path_length_mm"],**params)
-
-    if "A12_Subtracted" in parsed_data:
-         plot_cd_spectra(parsed_data["A12_Subtracted"]['data'], sample_name="Sample A12",
-                        protein_concentration_uM=params_df.loc["A12", "cd_sample_molar_conc"]*10**6, num_residues=params_df.loc["A12", "sequence_length"], path_length_mm=params_df.loc["A12", "cd_path_length_mm"],**params)
-
-    # Plot B8 Pre- vs Post-Melt (Subtracted)
-    if "B8_Subtracted" in parsed_data and "B8_post_melt_Subtracted" in parsed_data:
-         plot_cd_spectra(parsed_data["B8_Subtracted"]['data'], sample_name="Sample B8 Pre-Melt",
-                        overlay_df=parsed_data["B8_post_melt_Subtracted"]['data'], overlay_label="B8 Post-Melt",
-                        protein_concentration_uM=params_df.loc["B8", "cd_sample_molar_conc"]*10**6, num_residues=params_df.loc["B8", "sequence_length"], path_length_mm=params_df.loc["B8", "cd_path_length_mm"],**params,
-                        title="CD Spectra Comparison")
-
-    # Plot B8 Melting Curve (Heating vs Cooling) - Using original (non-subtracted) data
-    # Melting curve baseline drift is often less critical than spectral baseline
-     # Example limits for melt
-
-    if "B8_melt" in parsed_data and "B8_remelt" in parsed_data:
-        # You might want specific MRE limits for melts
-        
-        plot_melting_curve(parsed_data["B8_melt"]['data'], sample_name="Sample B8",
-                           reverse_melt_df=parsed_data["B8_remelt"]['data'], reverse_label="Cooling",
-                           wavelength_nm=222, # Assume 222 nm unless specified elsewhere
-                           protein_concentration_uM=params_df.loc["B8", "cd_sample_molar_conc"]*10**6, path_length_mm=params_df.loc["B8", "cd_path_length_mm"], num_residues=params_df.loc["B8", "sequence_length"],**params)
-    elif "B8_melt" in parsed_data:
-         # Plot just the heating curve if cooling curve is missing
-         plot_melting_curve(parsed_data["B8_melt"]['data'], sample_name="Sample B8",
-                            wavelength_nm=222,
-                           protein_concentration_uM=params_df.loc["B8", "cd_sample_molar_conc"]*10**6, path_length_mm=params_df.loc["B8", "cd_path_length_mm"], num_residues=params_df.loc["B8", "sequence_length"],**params)
-
+    else:
+        print("Blank data not found. Exiting...")
+        exit(1)
+    
+    # Define the samples to process (all samples in the file dictionary except the Blank)
+    samples = ["A9", "A12", "B8", "A1", "B12", "F4"]
+    for sample in samples:
+        process_sample(sample, params_df, parsed_data, params, blank_df)
+    
     print(f"\nProcessing complete. Plots saved to '{output_dir}'")

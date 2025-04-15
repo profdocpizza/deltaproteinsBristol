@@ -1,0 +1,23 @@
+Cell Lysis:
+Frozen cell pellet resuspended in 20 ml binging buffer.
+Sonicated for 6 minutes on time, 2 seconds on at 70% intensity, 2 seconds off. 
+Take 20 uL sample after sonication.
+Spin down at (### g). Take samples of supernatant and pellet.
+
+Protein Purification:
+NI-NTA-IMAC columns (### details) equilibrated with binding buffer. Load the supernatant. Wash with binding buffer (### times). 
+Elute with elution buffer and collect fractions.
+#mL of protein sample was loaded to (SEC ## mL, 15 mL loop) to further purify the protein. 
+
+
+
+
+
+
+
+
+
+
+# Further experiments (Dek's suggestion):
+Completely prove that it is not oligomerising: run cd melt at 10x lower conc, but use 1 cm cuvette with stirrer. 
+Expect to see same graph like with higher conc, no concentration dependence. 
