@@ -6,6 +6,7 @@ import numpy as np
 useful_cols = [
     "orientation_code",
     "atp_cost_per_aa",
+    "atp_cost",
     "dna_complexity_per_aa",
     "pll",
     "pll_per_aa",
@@ -21,9 +22,10 @@ useful_cols = [
     "tm_score_assembly",
     "tm_score_design",
     "tm_rmsd100",
-    "n_potential_disulfide_bonds",
+    # "n_potential_disulfide_bonds",
     "dp_finder_total_cost",
-    "dp_finder_total_cost_norm",
+    "dp_finder_scale",
+
     "predicted_usability",
     "combined_score",
     "path_score_version",
@@ -51,8 +53,26 @@ useful_cols = [
     "packing_density",
     "rosetta_total_per_aa",
     "name",
+    "overall_distance_score_v2",
+    "overall_path_distance_score_v2",
+    "overall_contact_order_score",
+    "overall_linker_convenience_score",
+    "overall_linker_convenience_v2_score",
+    "path_score_v2",
+    "path_score_v3",
 ]
 
+composition_cols = [f"composition_{aa}" for aa in [
+    "PHE", "TYR", "TRP", "GLY", "ALA", "VAL", "LEU", "ILE", "MET", "CYS",
+    "PRO", "THR", "SER", "ASN", "GLN", "ASP", "GLU", "LYS", "ARG", "HIS"
+]]
+
+useful_cols = useful_cols + composition_cols
+
+useful_cols_non_csv = useful_cols + [
+    "taylor_letter_packing_descriptors",
+    "chothia_omega_angles",
+] 
 
 def count_non_overlapping_pairs(coords, ids, threshold):
     # threshold of 6 would be generous

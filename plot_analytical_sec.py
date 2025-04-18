@@ -4,8 +4,11 @@ import glob
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+from pyparsing import line
 import seaborn as sns
 
+# set colorblind palette
+sns.set_palette("colorblind")
 FLOW_RATE_ML_PER_MIN = 0.8
 
 params_df = pd.read_csv("/home/tadas/code/deltaproteinsBristol/experimental_results/deltaprot_designs_data_with_results.csv")[["Well Position","Name","mass_w_prefix"]]
@@ -50,7 +53,7 @@ for label in params_df["Well Position"].tolist():
     plt.close()
 
 # make one ovverlapping plot for overlap for A9,A19 and B8
-labels = ['A9', 'A12', 'B8','A1','B12','F4']
+labels = ['A9', 'A12', 'B8','A1','B12','F4','A11','B3','F4']
 
 fig = plt.figure(figsize=(5, 3))
 
@@ -67,34 +70,30 @@ for label in labels:
     df['Intensity'] = df['Intensity'] / df['Intensity'].max()
     baseline_offset = df['Intensity'].min()  # Compute the minimum intensity as the baseline
     df['Intensity'] = df['Intensity'] - baseline_offset  # Subtract the baseline
-
-
+    df['Intensity'] = df['Intensity'] / df['Intensity'].max()
 
     # Peak-based cropping
     max_idx = df['Intensity'].idxmax()
     peak_vol = df.loc[max_idx, 'Volume_mL']
-    cropped_df = df #df[(df['Volume_mL'] >= 8) & (df['Volume_mL'] <= 20)]
-
-    # Skip if cropping removes all data
-    if cropped_df.empty:
-        print(f"No data in cropped region for {label}. Skipping.")
-        continue
-
     # Plot
-    sns.lineplot(data=cropped_df, x='Volume_mL', y='Intensity', label=label)
+    sns.lineplot(data=df, x='Volume_mL', y='Intensity', label=label,linewidth=1)
 
     # Annotate the peak with mass
-    cropped_peak_idx = cropped_df['Intensity'].idxmax()
-    peak_x = cropped_df.loc[cropped_peak_idx, 'Volume_mL']
-    peak_y = cropped_df.loc[cropped_peak_idx, 'Intensity']
+    cropped_peak_idx = df['Intensity'].idxmax()
+    peak_x = df.loc[cropped_peak_idx, 'Volume_mL']
+    peak_y = df.loc[cropped_peak_idx, 'Intensity']
     mass = params_df[params_df["Well Position"] == label]["mass_w_prefix"].iloc[0]
-    plt.annotate(f"{round(mass)}", xy=(peak_x, peak_y), fontsize=5, ha='center', va='bottom')
+    # rotate anotations 90 degrees
+    plt.annotate(f"{round(mass/1000,1)}", xy=(peak_x, peak_y*1.01), fontsize=4, ha='center', va='bottom', rotation=90)
 
 # use dashed grid
 plt.grid(True, linestyle='--', alpha=0.5)
 plt.tight_layout()
 plt.xlabel('Volume (mL)')
 plt.ylabel('Intensity')
+# set y lims
+plt.ylim(0,1.1)
+plt.xlim(9,18)
 plt.legend()
 
 # Save plots

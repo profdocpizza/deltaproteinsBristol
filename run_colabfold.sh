@@ -1,0 +1,1 @@
+colabfold_batch /home/tadas/code/bristol_af2_oligosearc_experiment/oligo_search.fasta /home/tadas/code/bristol_af2_oligosearc_experiment/outputs --num-seeds 5 --num-models 1 --num-recycle 0

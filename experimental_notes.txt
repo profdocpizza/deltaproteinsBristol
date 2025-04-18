@@ -21,3 +21,13 @@ Elute with elution buffer and collect fractions.
 # Further experiments (Dek's suggestion):
 Completely prove that it is not oligomerising: run cd melt at 10x lower conc, but use 1 cm cuvette with stirrer. 
 Expect to see same graph like with higher conc, no concentration dependence. 
+- Check for burried tryptophans
+
+
+
+
+# B3 had a good expression, lot of protein purified after his tag, but aggregated once in PBS buffer. significant pellet after first spin down. Then after a day in a fridge, one more spin down with significnat pellet (two thirds aggregated)
+
+
+# TODO , 'C6' was transformed later, but expression not yet tested. Ask Luis to run it.
+# 3 more proteins left to crystalise. Send info which ones to Luis
