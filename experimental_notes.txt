@@ -31,3 +31,9 @@ Expect to see same graph like with higher conc, no concentration dependence.
 
 # TODO , 'C6' was transformed later, but expression not yet tested. Ask Luis to run it.
 # 3 more proteins left to crystalise. Send info which ones to Luis
+
+
+
+# SAXS samples:
+Sending my SAXS sample protein sequences. Sent 6 different proteins named A1, A9, A12, B8, B12, F4. 
+These proteins are in B21-00544 rack (1-8 positions) and in B21-00503 rack (5-6 positions). There is a duplicate sample for each protein (with different concentration)
