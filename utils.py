@@ -2,8 +2,9 @@ from itertools import combinations
 import ampal
 import numpy as np
 
+gene_synthesis_cols = ["Well Position","Name","Sequence"]
 
-useful_cols = [
+metrics_cols = [
     "orientation_code",
     "atp_cost_per_aa",
     "atp_cost",
@@ -67,7 +68,7 @@ composition_cols = [f"composition_{aa}" for aa in [
     "PRO", "THR", "SER", "ASN", "GLN", "ASP", "GLU", "LYS", "ARG", "HIS"
 ]]
 
-useful_cols = useful_cols + composition_cols
+useful_cols = gene_synthesis_cols + metrics_cols + composition_cols
 
 useful_cols_non_csv = useful_cols + [
     "taylor_letter_packing_descriptors",
