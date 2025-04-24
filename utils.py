@@ -2,8 +2,21 @@ from itertools import combinations
 import ampal
 import numpy as np
 
-gene_synthesis_cols = ["Well Position","Name","Sequence"]
 
+gene_synthesis_cols = ["Well Position","Name","Sequence"]
+sharing_cols = gene_synthesis_cols + [
+    "orientation_code",
+    "isoelectric_point",
+    "charge",
+    "mass",
+    "sequence_length",
+    "mean_plddt",
+    "mean_pae",
+    "ptm",
+    "tm_rmsd100",
+    "dp_finder_total_cost",
+    "sequence_molar_extinction_280",
+]
 metrics_cols = [
     "orientation_code",
     "atp_cost_per_aa",
@@ -13,7 +26,7 @@ metrics_cols = [
     "pll_per_aa",
     "isoelectric_point",
     "charge",
-    "sequence_charge",
+    # "sequence_charge" redundant to charge
     "mass",
     "sequence_length",
     "mean_plddt",
@@ -43,7 +56,7 @@ metrics_cols = [
     "aa_count_per_gap",
     "model_sequence",
     "sequence_molar_extinction_280",
-    "sequence_molecular_weight",
+    # "sequence_molecular_weight", # redundant to mass
     "backbone_loop_mask_string",
     "aligned_length",
     "seq_id",

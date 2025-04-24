@@ -12,25 +12,48 @@ Elute with elution buffer and collect fractions.
 
 
 
+# B3 had a good expression, lot of protein purified after his tag, but aggregated once in PBS buffer. significant pellet after first spin down. Then after a day in a fridge, one more spin down with significnat pellet (two thirds aggregated)
 
 
 
 
+# Further experiments (Necessary):
+
+- 'C6' expression test. (transformation was done later in the visit)
+- set up crystal trays for three already-purified deltaproteins (A11, B10, F4). 
+
+- characterise remaining 11 deltaproteins that expressed. Would start with high/medium expressing (5/11 proteins).
+
+    "Well Position"	"expression_levels"
+    A3	low
+    A5	high
+    A6	low
+    A7	medium
+    A8	low
+    A10	medium
+    B1	low
+    B2	high
+    B4	low
+    C1	medium
+    C3	low
+
+- design a small molecule binder (heme?) and experimentally validate it
 
 
-# Further experiments (Dek's suggestion):
-Completely prove that it is not oligomerising: run cd melt at 10x lower conc, but use 1 cm cuvette with stirrer. 
-Expect to see same graph like with higher conc, no concentration dependence. 
+
+# Further experiments (Optional):
+
+- Completely prove that it is not oligomerising: 
+    run cd melt at 10x lower conc, but use 1 cm cuvette with stirrer. 
+    Expect to see same graph like with higher conc, no concentration dependence. 
+
 - Check for burried tryptophans
 
 
 
 
-# B3 had a good expression, lot of protein purified after his tag, but aggregated once in PBS buffer. significant pellet after first spin down. Then after a day in a fridge, one more spin down with significnat pellet (two thirds aggregated)
 
 
-# TODO , 'C6' was transformed later, but expression not yet tested. Ask Luis to run it.
-# 3 more proteins left to crystalise. Send info which ones to Luis
 
 
 
