@@ -16,6 +16,7 @@ sharing_cols = gene_synthesis_cols + [
     "tm_rmsd100",
     "dp_finder_total_cost",
     "sequence_molar_extinction_280",
+    "model_sequence"
 ]
 metrics_cols = [
     "orientation_code",
