@@ -339,6 +339,18 @@ if __name__ == "__main__":
         "F4_melt": "20250404_1mm_BP-Buffer_F4_melt.txt",
         "F4_remelt": "20250404_1mm_BP-Buffer_F4_melt@.txt",
         "F4_post_melt": "20250404_1mm_BP-Buffer_F4_post_melt.txt",
+        "A11": "20250416_1mm_BP-Buffer_A11.txt",
+        "A11_melt": "20250416_1mm_BP-Buffer_A11_melt.txt",
+        "A11_remelt": "20250416_1mm_BP-Buffer_A11_melt@.txt",
+        "A11_post_melt": "20250416_1mm_BP-Buffer_A11_post_melt.txt",
+        "B3": "20250416_1mm_BP-Buffer_B3.txt",
+        "B3_melt": "20250416_1mm_BP-Buffer_B3_melt.txt",
+        "B3_remelt": "20250416_1mm_BP-Buffer_B3_melt@.txt",
+        "B3_post_melt": "20250416_1mm_BP-Buffer_B3_post_melt.txt",
+        "B10": "20250416_1mm_BP-Buffer_B10.txt",
+        "B10_melt": "20250416_1mm_BP-Buffer_B10_melt.txt",
+        "B10_remelt": "20250416_1mm_BP-Buffer_B10_melt@.txt",
+        "B10_post_melt": "20250416_1mm_BP-Buffer_B10_post_melt.txt"
     }
     
     # Parse all files
@@ -364,7 +376,7 @@ if __name__ == "__main__":
         exit(1)
     
     # Define the samples to process (all samples in the file dictionary except the Blank)
-    samples = ["A9", "A12", "B8", "A1", "B12", "F4"]
+    samples = ["A9", "A12", "B8", "A1", "B12", "F4","A11", "B3", "B10"]
     for sample in samples:
         process_sample(sample, params_df, parsed_data, params, blank_df)
     
