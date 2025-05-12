@@ -39,7 +39,7 @@ metrics_cols = [
     "tm_rmsd100",
     # "n_potential_disulfide_bonds",
     "dp_finder_total_cost",
-    "dp_finder_scale",
+    "dp_finder_total_scale",
 
     "predicted_usability",
     "combined_score",
