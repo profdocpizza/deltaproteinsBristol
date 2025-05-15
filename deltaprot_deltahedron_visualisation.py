@@ -5,6 +5,7 @@ Standalone script to overlay AlphaFold2-predicted protein structures with a Delt
 
 import sys
 from isambard.specifications import deltaprot_helper
+from isambard.specifications.deltaprot import DeltaProt
 from isambard.specifications.deltaprot_helper import Deltahedron
 import numpy as np
 import pandas as pd
@@ -16,11 +17,13 @@ from pymol.cgo import CYLINDER
 import pymol
 
 pymol.licensing.install_license_file(
-    "/home/tadas/code/deltaproteinsBristol/deltaprot_deltahedron_fig_data/pymol-edu-license.lic"
+    "/home/tadas/code/deltaproteinsBristol/pymol-edu-license.lic"
 )
 pymol.pymol_argv = ["pymol", "-qc"] + sys.argv[1:]
 cmd = pymol.cmd
-
+import os
+from PIL import Image
+from fpdf import FPDF
 
 def check_license_in_directory(directory):
     """Search for a .lic file starting one directory up from the helpers.py directory and scanning all subdirectories."""
@@ -189,7 +192,7 @@ def prepare_for_picture():
     cmd.set("field_of_view", 10)
 
 
-def main():
+def generate_deltaprotein_deltahedron_pngs():
 
     # Load design metadata
     df = pd.read_pickle(
@@ -232,7 +235,103 @@ def main():
             ribs=ribs,
             output_path=png_out,
         )
+ROW_CODES = [
+    ['b3iii', 'b3nnn'],
+    ['b4iiiix', 'b4iiiiy', 'b4nnnnx', 'b4nnnny', 'b4iiin', 'b4innn', 'b4inin', 'l4iin', 'l4inn', 'h4i_n'],
+    ['b5iiiin', 'b5innnn', 'b5iinin', 'b5ininn', 'l5iiin', 'l5innn', 'l5inni', 'l5niin', 'h5i_i', 'h5n_n'],
+    ['b6ininin', 'b6iiniin', 'b6inninn', 'l6innni', 'l6niiin', 'h6i_i_i', 'h6n_n_n', 's6']
+]
+
+def assemble_deltaprots_pdf(input_dir: str, save_root: str):
+    # 1) Gather all PNGs
+    pngs = [os.path.join(input_dir, f)
+            for f in os.listdir(input_dir)
+            if f.lower().endswith('.png')]
+
+    # 2) Match exactly one image per code
+    rows_images = []
+    for row_idx, codes in enumerate(ROW_CODES, start=1):
+        matched = []
+        for code in codes:
+            hits = [p for p in pngs if code in os.path.basename(p)]
+            if len(hits) == 0:
+                raise FileNotFoundError(f"[Row {row_idx}] no image found for code '{code}'")
+            if len(hits) > 1:
+                raise RuntimeError(f"[Row {row_idx}] multiple images for code '{code}': {hits}")
+            matched.append(hits[0])
+        rows_images.append(matched)
+
+    # 3) Prepare output path
+    out_dir = os.path.join(save_root, 'M&F_deltaprots')
+    os.makedirs(out_dir, exist_ok=True)
+    output_pdf = os.path.join(out_dir, 'M&F_deltaprots.pdf')
+
+    # 4) Set up PDF
+    pdf = FPDF(orientation='L', unit='mm', format='A4')
+    pdf.set_auto_page_break(False)
+    pdf.add_page()
+
+    # margins
+    margin_x = 5  # mm left/right
+    margin_y = 5  # mm top/bottom
+
+    total_w = pdf.w - 2 * margin_x
+    total_h = pdf.h - 2 * margin_y
+    nrows   = len(rows_images)
+    row_h   = total_h / nrows *0.7
+
+    # 5) Compute baseline_span using rows 2–4
+    lens_2to4 = [len(r) for r in rows_images[1:]]
+    max_n = max(lens_2to4)
+    min_n = min(lens_2to4)
+    baseline_span = (min_n / max_n) * total_w
+
+    # 6) Precompute the 4th-row cell width
+    n4 = len(rows_images[3])
+    cell_w_row4 = baseline_span / n4
+
+    # 7) Place text + images
+    pdf.set_font('Courier',style='B', size=8)
+    text_height = 4  # mm reserved for the label
+
+    for i, imgs in enumerate(rows_images):
+        # choose cell width
+        if i == 0:
+            cell_w = cell_w_row4
+        else:
+            cell_w = baseline_span / len(imgs)
+
+        # y-coordinate of the TOP of the image
+        y_img = margin_y + i * row_h
+        for j, img_path in enumerate(imgs):
+            x_img = margin_x + j * cell_w
+
+            # 7a) draw label above the image using ROW_CODES
+            code = ROW_CODES[i][j].upper().replace('_', '.').replace('X', 'x').replace('Y', 'y')
+            pdf.set_xy(x_img, y_img - text_height)
+            pdf.cell(cell_w, text_height, code, border=0, ln=0, align='C')
+
+            # 7b) open for aspect ratio
+            with Image.open(img_path) as im:
+                iw, ih = im.size
+            ar = iw / ih
+
+            # fit image into the same cell height (minus label area)
+            avail_h = row_h - text_height
+            w = cell_w
+            h = cell_w / ar
+            if h > avail_h:
+                h = avail_h
+                w = avail_h * ar
+
+            # place the image
+            pdf.image(img_path, x=x_img, y=y_img, w=w, h=h)
+
+    # 8) Save PDF
+    pdf.output(output_pdf)
+
 
 
 if __name__ == "__main__":
-    main()
+    # generate_deltaprotein_deltahedron_pngs()
+    assemble_deltaprots_pdf("/home/tadas/code/random/m_f_orienattions_images/None_source_files","/home/tadas/code/random/m_f_orienattions_images")
