@@ -25,6 +25,7 @@ import os
 from PIL import Image
 from fpdf import FPDF
 
+
 def check_license_in_directory(directory):
     """Search for a .lic file starting one directory up from the helpers.py directory and scanning all subdirectories."""
 
@@ -57,10 +58,10 @@ def pymol_visualise_deltaprot_deltahedron(
     cmd.delete("all")
 
     # Load and style protein
-    cmd.load(af2_filepath, "protein", quiet=1)
-    cmd.hide("everything", "protein")
-    cmd.show("cartoon", "protein")
-    cmd.color("slate", "protein")
+    cmd.load(af2_filepath, "deltaprotein", quiet=1)
+    cmd.hide("everything", "deltaprotein")
+    cmd.show("cartoon", "deltaprotein")
+    cmd.color("slate", "deltaprotein")
 
     # CGO styling parameters
     thin_radius = 0.1
@@ -115,7 +116,7 @@ def pymol_visualise_deltaprot_deltahedron(
     flat = M_inv.T.flatten().tolist()
 
     # Apply inverse to objects
-    cmd.set_object_ttt("protein", flat, homogenous=1)
+    cmd.set_object_ttt("deltaprotein", flat, homogenous=1)
     cmd.set_object_ttt("deltahedron", flat, homogenous=1)
 
     verts = np.array(deltahedron.vertices)
@@ -125,9 +126,9 @@ def pymol_visualise_deltaprot_deltahedron(
     com = verts_trans.mean(axis=0)  # length‐3 vector
 
     # 4) shift both protein and deltahedron by −COM in PyMOL
-    cmd.translate(list(-com), object="protein")
+    cmd.translate(list(-com), object="deltaprotein")
     cmd.translate(list(-com), object="deltahedron")
-    # cmd.translate(list([0,0,50]), object = "protein")
+    # cmd.translate(list([0,0,50]), object = "deltaprotein")
     # cmd.translate(list([0,0,50]), object = "deltahedron")
     # set camera position at
     # prepare_for_picture()
@@ -165,7 +166,7 @@ def pymol_visualise_deltaprot_deltahedron(
         time.sleep(0.02)
     time.sleep(0.1)
     # Render PNG
-    cmd.png(output_path, width=900, height=900, ray=1, quiet=1)
+    cmd.png(output_path, width=2000, height=2000, ray=1, quiet=1)
     while not os.path.exists(output_path):
         time.sleep(0.02)
     time.sleep(0.1)
@@ -235,18 +236,54 @@ def generate_deltaprotein_deltahedron_pngs():
             ribs=ribs,
             output_path=png_out,
         )
+
+
 ROW_CODES = [
-    ['b3iii', 'b3nnn'],
-    ['b4iiiix', 'b4iiiiy', 'b4nnnnx', 'b4nnnny', 'b4iiin', 'b4innn', 'b4inin', 'l4iin', 'l4inn', 'h4i_n'],
-    ['b5iiiin', 'b5innnn', 'b5iinin', 'b5ininn', 'l5iiin', 'l5innn', 'l5inni', 'l5niin', 'h5i_i', 'h5n_n'],
-    ['b6ininin', 'b6iiniin', 'b6inninn', 'l6innni', 'l6niiin', 'h6i_i_i', 'h6n_n_n', 's6']
+    ["b3iii", "b3nnn"],
+    [
+        "b4iiiix",
+        "b4iiiiy",
+        "b4nnnnx",
+        "b4nnnny",
+        "b4iiin",
+        "b4innn",
+        "b4inin",
+        "l4iin",
+        "l4inn",
+        "h4i_n",
+    ],
+    [
+        "b5iiiin",
+        "b5innnn",
+        "b5iinin",
+        "b5ininn",
+        "l5iiin",
+        "l5innn",
+        "l5inni",
+        "l5niin",
+        "h5i_i",
+        "h5n_n",
+    ],
+    [
+        "b6ininin",
+        "b6iiniin",
+        "b6inninn",
+        "l6innni",
+        "l6niiin",
+        "h6i_i_i",
+        "h6n_n_n",
+        "s6",
+    ],
 ]
+
 
 def assemble_deltaprots_pdf(input_dir: str, save_root: str):
     # 1) Gather all PNGs
-    pngs = [os.path.join(input_dir, f)
-            for f in os.listdir(input_dir)
-            if f.lower().endswith('.png')]
+    pngs = [
+        os.path.join(input_dir, f)
+        for f in os.listdir(input_dir)
+        if f.lower().endswith(".png")
+    ]
 
     # 2) Match exactly one image per code
     rows_images = []
@@ -255,19 +292,23 @@ def assemble_deltaprots_pdf(input_dir: str, save_root: str):
         for code in codes:
             hits = [p for p in pngs if code in os.path.basename(p)]
             if len(hits) == 0:
-                raise FileNotFoundError(f"[Row {row_idx}] no image found for code '{code}'")
+                raise FileNotFoundError(
+                    f"[Row {row_idx}] no image found for code '{code}'"
+                )
             if len(hits) > 1:
-                raise RuntimeError(f"[Row {row_idx}] multiple images for code '{code}': {hits}")
+                raise RuntimeError(
+                    f"[Row {row_idx}] multiple images for code '{code}': {hits}"
+                )
             matched.append(hits[0])
         rows_images.append(matched)
 
     # 3) Prepare output path
-    out_dir = os.path.join(save_root, 'M&F_deltaprots')
+    out_dir = os.path.join(save_root, "M&F_deltaprots")
     os.makedirs(out_dir, exist_ok=True)
-    output_pdf = os.path.join(out_dir, 'M&F_deltaprots.pdf')
+    output_pdf = os.path.join(out_dir, "M&F_deltaprots.pdf")
 
     # 4) Set up PDF
-    pdf = FPDF(orientation='L', unit='mm', format='A4')
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
     pdf.set_auto_page_break(False)
     pdf.add_page()
 
@@ -277,8 +318,8 @@ def assemble_deltaprots_pdf(input_dir: str, save_root: str):
 
     total_w = pdf.w - 2 * margin_x
     total_h = pdf.h - 2 * margin_y
-    nrows   = len(rows_images)
-    row_h   = total_h / nrows *0.7
+    nrows = len(rows_images)
+    row_h = total_h / nrows * 0.7
 
     # 5) Compute baseline_span using rows 2–4
     lens_2to4 = [len(r) for r in rows_images[1:]]
@@ -291,7 +332,7 @@ def assemble_deltaprots_pdf(input_dir: str, save_root: str):
     cell_w_row4 = baseline_span / n4
 
     # 7) Place text + images
-    pdf.set_font('Courier',style='B', size=8)
+    pdf.set_font("Courier", style="B", size=8)
     text_height = 4  # mm reserved for the label
 
     for i, imgs in enumerate(rows_images):
@@ -307,9 +348,15 @@ def assemble_deltaprots_pdf(input_dir: str, save_root: str):
             x_img = margin_x + j * cell_w
 
             # 7a) draw label above the image using ROW_CODES
-            code = ROW_CODES[i][j].upper().replace('_', '.').replace('X', 'x').replace('Y', 'y')
+            code = (
+                ROW_CODES[i][j]
+                .upper()
+                .replace("_", ".")
+                .replace("X", "x")
+                .replace("Y", "y")
+            )
             pdf.set_xy(x_img, y_img - text_height)
-            pdf.cell(cell_w, text_height, code, border=0, ln=0, align='C')
+            pdf.cell(cell_w, text_height, code, border=0, ln=0, align="C")
 
             # 7b) open for aspect ratio
             with Image.open(img_path) as im:
@@ -331,7 +378,9 @@ def assemble_deltaprots_pdf(input_dir: str, save_root: str):
     pdf.output(output_pdf)
 
 
-
 if __name__ == "__main__":
     # generate_deltaprotein_deltahedron_pngs()
-    assemble_deltaprots_pdf("/home/tadas/code/random/m_f_orienattions_images/None_source_files","/home/tadas/code/random/m_f_orienattions_images")
+    assemble_deltaprots_pdf(
+        "/home/tadas/code/deltaproteinsBristol/deltaprot_deltahedron_fig_data",
+        "/home/tadas/code/deltaproteinsBristol/deltaprot_deltahedron_fig_data",
+    )
