@@ -1,7 +1,39 @@
 #!/usr/bin/env python3
 """
-Standalone script to overlay AlphaFold2-predicted protein structures with a Deltahedron geometry using PyMOL.
+Standalone script to overlay (or singly render) Deltahedron geometries
+with optional AlphaFold2-predicted proteins and thick ribs, using PyMOL.
+
+New flags:
+  - deltahedron_only          : draw only thin cylinders + vertex spheres
+  - deltahedron_w_ribs_only  : draw thin cylinders + vertex spheres + thick ribs (no protein)
+  - (default)                 : draw everything (protein + thin edges + spheres + ribs)
 """
+
+import sys
+import os
+import time
+from isambard.specifications import deltaprot
+import numpy as np
+import pandas as pd
+
+import pymol
+from pymol.cgo import CYLINDER, SPHERE, COLOR
+
+# ---------------------------
+# 1) LAUNCH PYMOL (GUI mode)
+# ---------------------------
+
+# Install license, remove "-c" so PyMOL creates a window
+pymol.licensing.install_license_file(
+    "/home/tadas/code/deltaproteinsBristol/pymol-edu-license.lic"
+)
+pymol.pymol_argv = ["pymol", "-q"] + sys.argv[1:]
+pymol.finish_launching()
+cmd = pymol.cmd
+
+# ---------------------------
+# 2) HELPER FUNCTIONS
+# ---------------------------
 
 import sys
 from isambard.specifications import deltaprot_helper
@@ -13,8 +45,7 @@ import os
 import time
 
 import pymol
-from pymol.cgo import CYLINDER
-import pymol
+from pymol.cgo import CYLINDER, SPHERE, COLOR
 
 pymol.licensing.install_license_file(
     "/home/tadas/code/deltaproteinsBristol/pymol-edu-license.lic"
@@ -26,361 +57,390 @@ from PIL import Image
 from fpdf import FPDF
 
 
-def check_license_in_directory(directory):
-    """Search for a .lic file starting one directory up from the helpers.py directory and scanning all subdirectories."""
-
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            if file.endswith(".lic"):
-                license_file_path = os.path.join(root, file)
-                print(f"Found pymol license at {license_file_path}")
-                pymol.licensing.check_license_file(license_file_path)
-                # pymol.licensing.install_license_file(license_file_path)
-                pymol.licensing.install_license_file(license_file_path)
-                # return pymol.licensing.install_license_file(license_file_path)
-    return "No .lic file found in the parent directory or its subdirectories."
-
-
-def pymol_visualise_deltaprot_deltahedron(
-    af2_filepath: str,
-    deltahedron: Deltahedron,
-    ribs,
-    output_path: str,
-    transform_matrix: np.ndarray,
-):
+def build_thin_edges_cgo(deltahedron, thin_radius=0.1, thin_color=(0.43, 0.41, 0.42)):
     """
-    Load an AF2 PDB and overlay Deltahedron edges and ribs as CGO cylinders,
-    then apply the inverse rotation and translation (preserving scale) of transform_matrix,
-    and save a PNG and PSE session.
+    Return a CGO list of all thin‐radius cylinders for every edge in the deltahedron.
     """
-    # Clear scene
-
-    cmd.delete("all")
-
-    # Load and style protein
-    cmd.load(af2_filepath, "deltaprotein", quiet=1)
-    cmd.hide("everything", "deltaprotein")
-    cmd.show("cartoon", "deltaprotein")
-    cmd.color("slate", "deltaprotein")
-
-    # CGO styling parameters
-    thin_radius = 0.1
-    rib_radius = 0.5
-    thin_color = (0.43, 0.41, 0.42)
-    rib_color = (0.8, 0.2, 0.1)
-
-    # Build CGO for all edges
-    cgo = []
+    thin_cgo = []
     for i, neighbors in enumerate(deltahedron.connection_matrix):
         for j in neighbors:
             if i < j:
                 v1 = deltahedron.vertices[i]
                 v2 = deltahedron.vertices[j]
-                cgo += [
+                thin_cgo += [
                     CYLINDER,
-                    *v1,
-                    *v2,
+                    v1[0],
+                    v1[1],
+                    v1[2],
+                    v2[0],
+                    v2[1],
+                    v2[2],
                     thin_radius,
-                    *thin_color,
-                    *thin_color,
+                    thin_color[0],
+                    thin_color[1],
+                    thin_color[2],
+                    thin_color[0],
+                    thin_color[1],
+                    thin_color[2],
                 ]
-    # Highlight ribs
+    return thin_cgo
+
+
+def build_vertex_spheres_cgo(
+    deltahedron, thin_radius=0.1, thin_color=(0.43, 0.41, 0.42)
+):
+    """
+    Return a CGO list of one small sphere at each deltahedron vertex.
+    Each SPHERE is preceded by a COLOR primitive (required by PyMOL).
+    """
+    vert_cgo = []
+    for v in deltahedron.vertices:
+        vert_cgo += [
+            COLOR,
+            thin_color[0],
+            thin_color[1],
+            thin_color[2],  # set color for the sphere
+            SPHERE,
+            v[0],
+            v[1],
+            v[2],  # x, y, z
+            thin_radius,  # radius
+        ]
+    return vert_cgo
+
+
+def build_thick_ribs_cgo(
+    deltahedron, ribs, rib_radius=0.5, rib_color=(0.80, 0.20, 0.10)
+):
+    """
+    Return a CGO list of thick cylinders for the specified ribs.
+    'ribs' is a list of (i, j) index pairs.
+    """
+    rib_cgo = []
     for i, j in ribs:
         v1 = deltahedron.vertices[i]
         v2 = deltahedron.vertices[j]
-        cgo += [
+        rib_cgo += [
             CYLINDER,
-            *v1,
-            *v2,
+            v1[0],
+            v1[1],
+            v1[2],
+            v2[0],
+            v2[1],
+            v2[2],
             rib_radius,
-            *rib_color,
-            *rib_color,
+            rib_color[0],
+            rib_color[1],
+            rib_color[2],
+            rib_color[0],
+            rib_color[1],
+            rib_color[2],
         ]
-    cmd.load_cgo(cgo, "deltahedron")
+    return rib_cgo
 
-    # Extract uniform scale from T
-    scale = np.linalg.norm(transform_matrix[:3, :3] @ np.array([1.0, 0, 0]))
-    # Extract pure rotation (R) and original translation (t), undoing scale
+
+def apply_inverse_transform(object_names, transform_matrix):
+    """
+    Given a list of PyMOL object names and a 4×4 transform,
+    compute the inverse (no scale) and apply it to each object via set_object_ttt().
+    """
+    # Extract uniform scale from the upper 3x3 block
+    scale = np.linalg.norm(transform_matrix[:3, :3] @ np.array([1.0, 0.0, 0.0]))
     R = transform_matrix[:3, :3] / scale
     t = transform_matrix[:3, 3] / scale
 
-    # Compute inverse rotation and translation (no scale)
     R_inv = R.T
     t_inv = -R_inv.dot(t)
 
-    # Build inverse transform 4x4 (column-major order for PyMOL)
+    # Build 4×4 column-major matrix
     M_inv = np.eye(4)
     M_inv[:3, :3] = R_inv
     M_inv[:3, 3] = t_inv
-    # PyMOL expects a flattened column-major list
     flat = M_inv.T.flatten().tolist()
 
-    # Apply inverse to objects
-    cmd.set_object_ttt("deltaprotein", flat, homogenous=1)
-    cmd.set_object_ttt("deltahedron", flat, homogenous=1)
+    # Apply to each object
+    for obj in object_names:
+        cmd.set_object_ttt(obj, flat, homogenous=1)
 
-    verts = np.array(deltahedron.vertices)
-    verts_trans = (R_inv @ verts.T).T + t_inv  # shape (N,3)
+    return R_inv, t_inv  # also return for centering step
 
-    # 3) compute center‐of‐mass
-    com = verts_trans.mean(axis=0)  # length‐3 vector
 
-    # 4) shift both protein and deltahedron by −COM in PyMOL
-    cmd.translate(list(-com), object="deltaprotein")
-    cmd.translate(list(-com), object="deltahedron")
-    # cmd.translate(list([0,0,50]), object = "deltaprotein")
-    # cmd.translate(list([0,0,50]), object = "deltahedron")
-    # set camera position at
-    # prepare_for_picture()
+def recenter_objects(object_names, deltahedron, R_inv, t_inv):
+    """
+    Compute centroid of transformed vertices and translate all object_names by -centroid.
+    """
+    verts = np.array(deltahedron.vertices)  # raw coordinates
+    verts_trans = (R_inv @ verts.T).T + t_inv  # after inverse transform
+    com = verts_trans.mean(axis=0).tolist()  # centroid coords
 
-    # Rendering settings
-    cmd.set("ray_opaque_background", 0)
-    cmd.bg_color("white")
-    cmd.set("ray_trace_frames", 0)
-    cmd.set("ray_shadows", 1)
-    cmd.set("antialias", 2)
-    cmd.set("orthoscopic", 1)
-    cmd.set("ray_trace_mode", 1)
+    # Translate each object by -com
+    dx, dy, dz = com
+    for obj in object_names:
+        cmd.translate([-dx, -dy, -dz], object=obj)
 
-    # recreate M&F figure rotations
-    if deltahedron.name == "octahedron":
-        cmd.turn("x", -90)
-        cmd.turn("y", 45)
-        cmd.turn("x", 45)
-    elif deltahedron.name == "snub_disphenoid":
-        cmd.turn("x", -90)
-        cmd.turn("y", 45)
-    elif deltahedron.name == "gyro_square_bipyramid":
-        cmd.turn("x", -90)
-        cmd.turn("y", -105)
-        cmd.turn("x", 15)
-    elif deltahedron.name == "icosahedron":
-        cmd.turn("x", -75)
 
-    # cmd.center()
-    cmd.zoom(buffer=1, complete=1)
-    # Save session
+def save_session_and_png(output_path):
+    """
+    Save a .pse alongside the given .png path, then render the PNG at high resolution.
+    """
     pse_path = output_path.replace(".png", ".pse")
     cmd.save(pse_path)
     while not os.path.exists(pse_path):
         time.sleep(0.02)
     time.sleep(0.1)
-    # Render PNG
+
     cmd.png(output_path, width=2000, height=2000, ray=1, quiet=1)
     while not os.path.exists(output_path):
         time.sleep(0.02)
     time.sleep(0.1)
-    # Clean up
+
+
+def setup_rendering_camera(deltahedron):
+    """
+    Apply standard orthoscopic/white‐background settings and optionally
+    rotate to a canonical orientation based on deltahedron.name.
+    """
+    cmd.set("orthoscopic", 1)
+    cmd.bg_color("white")
+    cmd.set("ray_opaque_background", 0)
+    cmd.set("antialias", 2)
+    cmd.set("ray_shadows", 1)
+    cmd.set("ray_trace_mode", 1)
+
+    if hasattr(deltahedron, "name"):
+        if deltahedron.name == "octahedron":
+            cmd.turn("x", -90)
+            cmd.turn("y", 45)
+            cmd.turn("x", 45)
+        elif deltahedron.name == "snub_disphenoid":
+            cmd.turn("x", -90)
+            cmd.turn("y", 45)
+        elif deltahedron.name == "gyro_square_bipyramid":
+            cmd.turn("x", -90)
+            cmd.turn("y", -105)
+            cmd.turn("x", 15)
+        elif deltahedron.name == "icosahedron":
+            cmd.turn("x", -75)
+
+    cmd.zoom(buffer=1, complete=1)
+
+
+# ---------------------------
+# 3) MAIN FUNCTION (REFRACTOR)
+# ---------------------------
+
+
+def pymol_visualise_deltaprot_deltahedron(
+    # Always required arguments:
+    deltahedron,  # Deltahedron instance (has .vertices, .connection_matrix, .name)
+    output_path: str,
+    transform_matrix: np.ndarray,  # 4×4 transform from raw Δ → aligned coords
+    # Optional arguments for protein + ribs:
+    af2_filepath: str = None,  # path to AF2 PDB (only used if not deltahedron_only / deltahedron_w_ribs_only=False)
+    ribs: list = None,  # list of (i,j) for thick ribs (only used if ribs are to be drawn)
+    # Flags to choose the scene:
+    deltahedron_only: bool = False,
+    deltahedron_w_ribs_only: bool = False,
+):
+    """
+    Generate one of three scenes in PyMOL, then save a PSE + PNG:
+
+    1) deltahedron_only=True:
+         - Draw only thin cylinders + vertex spheres (no protein, no ribs).
+         - 'af2_filepath' and 'ribs' are ignored.
+         - transform_matrix still applies so that the deltahedron is centered properly.
+
+    2) deltahedron_w_ribs_only=True:
+         - Draw thin cylinders + vertex spheres + thick ribs (no protein).
+         - 'ribs' must be provided; 'af2_filepath' is ignored.
+
+    3) (default: both flags False):
+         - Draw the AF2 protein (cartoon), plus thin cylinders, vertex spheres, and thick ribs.
+         - 'af2_filepath' and 'ribs' both must be provided.
+
+    Exactly one of (deltahedron_only, deltahedron_w_ribs_only) may be True; if both are False,
+    we render the “full” scene including the protein.
+    """
+
+    # Validate flag combinations
+    if deltahedron_only and deltahedron_w_ribs_only:
+        raise ValueError(
+            "Only one of deltahedron_only or deltahedron_w_ribs_only may be True."
+        )
+
+    # 1) Clear any previous objects
+    cmd.delete("all")
+
+    # 2) Optionally load the protein (full‐scene only)
+    if not deltahedron_only and not deltahedron_w_ribs_only:
+        if af2_filepath is None:
+            raise ValueError("af2_filepath must be provided when rendering full scene.")
+        cmd.load(af2_filepath, "deltaprotein", quiet=1)
+        cmd.hide("everything", "deltaprotein")
+        cmd.show("cartoon", "deltaprotein")
+        cmd.color("slate", "deltaprotein")
+
+    # 3) Build CGO objects
+    thin_cgo = build_thin_edges_cgo(deltahedron)
+    vert_cgo = build_vertex_spheres_cgo(deltahedron)
+    # Load thin‐edges and vertex spheres even if deltahedron_only or deltahedron_w_ribs_only
+    cmd.load_cgo(thin_cgo, "deltahedron_edges_cgo")
+    cmd.load_cgo(vert_cgo, "deltahedron_vertices_cgo")
+
+    # 4) If ribs are to be drawn (either full or ribs‐only), build & load them
+    if not deltahedron_only:
+        if ribs is None:
+            raise ValueError("'ribs' must be provided to draw ribs.")
+        rib_cgo = build_thick_ribs_cgo(deltahedron, ribs)
+        cmd.load_cgo(rib_cgo, "deltahedron_ribs_cgo")
+
+    # 5) Group thin edges + vertex spheres under a single name for toggling
+    cmd.group("deltahedron_edges", "deltahedron_edges_cgo")
+    cmd.group("deltahedron_edges", "deltahedron_vertices_cgo")
+
+    # 6) Determine which objects exist and need transforms
+    objects_to_transform = []
+    if not deltahedron_only and not deltahedron_w_ribs_only:
+        objects_to_transform.append("deltaprotein")
+
+    # Always transform the CGO objects we loaded:
+    objects_to_transform.append("deltahedron_edges_cgo")
+    objects_to_transform.append("deltahedron_vertices_cgo")
+    if not deltahedron_only:
+        objects_to_transform.append("deltahedron_ribs_cgo")
+
+    # 7) Apply inverse transform (no scale) to all relevant objects
+    R_inv, t_inv = apply_inverse_transform(objects_to_transform, transform_matrix)
+
+    # 8) Recenter entire scene so that the Δ‐centroid is at the origin
+    recenter_objects(objects_to_transform, deltahedron, R_inv, t_inv)
+
+    # 9) Setup rendering & camera
+    setup_rendering_camera(deltahedron)
+
+    # 10) Save session & PNG
+    save_session_and_png(output_path)
+
+    # 11) Clean up
     cmd.delete("all")
     cmd.reset()
 
 
-def prepare_for_picture():
-    from pymol import cmd
-
-    # Enable orthographic projection
-    cmd.set("orthoscopic", 1)
-
-    # Adjust clipping planes to encompass the entire object
-    cmd.clip("slab", 0)  # Reset any slab clipping
-    # cmd.set("clip_front", 0)  # Set front clipping plane to 0
-    # cmd.set("clip_back", 0)   # Set back clipping plane to 0
-
-    # Center and zoom to fit all objects
-    cmd.zoom("deltahedron")
-
-    # Optionally, set the field of view to a suitable value
-    cmd.set("field_of_view", 10)
+# ---------------------------
+# 4) EXAMPLE USAGE WRAPPERS
+# ---------------------------
 
 
-def generate_deltaprotein_deltahedron_pngs():
-
-    # Load design metadata
+def generate_full_deltaprot_pngs():
+    """
+    Example loop over a DataFrame of designs, rendering the full scene (protein + deltahedron + ribs).
+    """
     df = pd.read_pickle(
         "/home/tadas/code/deltaproteinsBristol/deltaprot_designs_all_data_with_results.pkl"
     )
-
-    # Process first 30 designs
     for _, row in df[:30].iterrows():
+        print(f"Processing design: {row['dp_finder_orientation_code']}")
         orientation_code = row["dp_finder_orientation_code"]
-        # if orientation_code not in ["b4inni","b4innn"]:
-        #     continue
         transform_matrix = np.array(row["dp_finder_total_transformation_matrix"])
         af2_pdb_path = os.path.join(
             "/home/tadas/code/deltaproteinsBristol/selected_deltaprots/no_disulfide",
             row["structure_prediction_file_name"],
         )
 
-        # Build and transform the Deltahedron
+        # Build and transform Deltahedron
         rib_num = int(orientation_code[1])
         deltahedron = Deltahedron.choose_deltahedron_by_rib_number(
             rib_num=rib_num, edge_length=1
         )
         deltahedron.transform(transform_matrix)
 
-        # Get ribs for this orientation
+        # Determine ribs
         ribs = deltaprot_helper.orientation_codes_sorted_ribs[
             orientation_code.replace("_", ".")
         ]
 
-        # Output filename
         out_dir = "/home/tadas/code/deltaproteinsBristol/deltaprot_deltahedron_fig_data"
         png_out = os.path.join(out_dir, f"{orientation_code}.png")
-        print(f"Rendering {orientation_code} -> {png_out}")
+        print(f"Rendering full scene for {orientation_code} → {png_out}")
 
-        # Generate overlay image
         pymol_visualise_deltaprot_deltahedron(
-            af2_filepath=af2_pdb_path,
             deltahedron=deltahedron,
-            transform_matrix=transform_matrix,
+            af2_filepath=af2_pdb_path,
             ribs=ribs,
             output_path=png_out,
+            transform_matrix=transform_matrix,
+            deltahedron_only=False,
+            deltahedron_w_ribs_only=False,
         )
 
 
-ROW_CODES = [
-    ["b3iii", "b3nnn"],
-    [
-        "b4iiiix",
-        "b4iiiiy",
-        "b4nnnnx",
-        "b4nnnny",
-        "b4iiin",
-        "b4innn",
-        "b4inin",
-        "l4iin",
-        "l4inn",
-        "h4i_n",
-    ],
-    [
-        "b5iiiin",
-        "b5innnn",
-        "b5iinin",
-        "b5ininn",
-        "l5iiin",
-        "l5innn",
-        "l5inni",
-        "l5niin",
-        "h5i_i",
-        "h5n_n",
-    ],
-    [
-        "b6ininin",
-        "b6iiniin",
-        "b6inninn",
-        "l6innni",
-        "l6niiin",
-        "h6i_i_i",
-        "h6n_n_n",
-        "s6",
-    ],
-]
+def generate_deltahedron_only_png(deltahedron, output_path, transform_matrix):
+    """
+    Example of rendering only the thin‐edge + vertex spheres, no ribs, no protein.
+    """
+    pymol_visualise_deltaprot_deltahedron(
+        deltahedron=deltahedron,
+        output_path=output_path,
+        transform_matrix=transform_matrix,
+        ribs=None,  # ignored in this mode
+        af2_filepath=None,  # ignored in this mode
+        deltahedron_only=True,
+        deltahedron_w_ribs_only=False,
+    )
 
 
-def assemble_deltaprots_pdf(input_dir: str, save_root: str):
-    # 1) Gather all PNGs
-    pngs = [
-        os.path.join(input_dir, f)
-        for f in os.listdir(input_dir)
-        if f.lower().endswith(".png")
-    ]
+def generate_deltahedron_with_ribs_only_png(
+    deltahedron, ribs, output_path, transform_matrix
+):
+    """
+    Example of rendering the thin‐edges + vertex spheres + thick ribs, but no protein.
+    """
+    pymol_visualise_deltaprot_deltahedron(
+        deltahedron=deltahedron,
+        output_path=output_path,
+        transform_matrix=transform_matrix,
+        af2_filepath=None,  # ignored in this mode
+        ribs=ribs,
+        deltahedron_only=False,
+        deltahedron_w_ribs_only=True,
+    )
 
-    # 2) Match exactly one image per code
-    rows_images = []
-    for row_idx, codes in enumerate(ROW_CODES, start=1):
-        matched = []
-        for code in codes:
-            hits = [p for p in pngs if code in os.path.basename(p)]
-            if len(hits) == 0:
-                raise FileNotFoundError(
-                    f"[Row {row_idx}] no image found for code '{code}'"
-                )
-            if len(hits) > 1:
-                raise RuntimeError(
-                    f"[Row {row_idx}] multiple images for code '{code}': {hits}"
-                )
-            matched.append(hits[0])
-        rows_images.append(matched)
 
-    # 3) Prepare output path
-    out_dir = os.path.join(save_root, "M&F_deltaprots")
-    os.makedirs(out_dir, exist_ok=True)
-    output_pdf = os.path.join(out_dir, "M&F_deltaprots.pdf")
+def generate_deltahedron_only_pngs():
+    for deltahedron_name in Deltahedron.supported_deltahedrons:
+        deltahedron = Deltahedron.choose_deltahedron_by_name(deltahedron_name, 11)
+        transform_matrix = np.eye(4)
+        output_path = f"/home/tadas/code/deltaproteinsBristol/deltaprot_deltahedron_fig_data/{deltahedron_name}_only.png"
+        print(f"Generating deltahedron only PNG for {deltahedron_name} → {output_path}")
+        generate_deltahedron_only_png(
+            deltahedron=deltahedron,
+            output_path=output_path,
+            transform_matrix=transform_matrix,
+        )
 
-    # 4) Set up PDF
-    pdf = FPDF(orientation="L", unit="mm", format="A4")
-    pdf.set_auto_page_break(False)
-    pdf.add_page()
 
-    # margins
-    margin_x = 5  # mm left/right
-    margin_y = 5  # mm top/bottom
-
-    total_w = pdf.w - 2 * margin_x
-    total_h = pdf.h - 2 * margin_y
-    nrows = len(rows_images)
-    row_h = total_h / nrows * 0.7
-
-    # 5) Compute baseline_span using rows 2–4
-    lens_2to4 = [len(r) for r in rows_images[1:]]
-    max_n = max(lens_2to4)
-    min_n = min(lens_2to4)
-    baseline_span = (min_n / max_n) * total_w
-
-    # 6) Precompute the 4th-row cell width
-    n4 = len(rows_images[3])
-    cell_w_row4 = baseline_span / n4
-
-    # 7) Place text + images
-    pdf.set_font("Courier", style="B", size=8)
-    text_height = 4  # mm reserved for the label
-
-    for i, imgs in enumerate(rows_images):
-        # choose cell width
-        if i == 0:
-            cell_w = cell_w_row4
-        else:
-            cell_w = baseline_span / len(imgs)
-
-        # y-coordinate of the TOP of the image
-        y_img = margin_y + i * row_h
-        for j, img_path in enumerate(imgs):
-            x_img = margin_x + j * cell_w
-
-            # 7a) draw label above the image using ROW_CODES
-            code = (
-                ROW_CODES[i][j]
-                .upper()
-                .replace("_", ".")
-                .replace("X", "x")
-                .replace("Y", "y")
-            )
-            pdf.set_xy(x_img, y_img - text_height)
-            pdf.cell(cell_w, text_height, code, border=0, ln=0, align="C")
-
-            # 7b) open for aspect ratio
-            with Image.open(img_path) as im:
-                iw, ih = im.size
-            ar = iw / ih
-
-            # fit image into the same cell height (minus label area)
-            avail_h = row_h - text_height
-            w = cell_w
-            h = cell_w / ar
-            if h > avail_h:
-                h = avail_h
-                w = avail_h * ar
-
-            # place the image
-            pdf.image(img_path, x=x_img, y=y_img, w=w, h=h)
-
-    # 8) Save PDF
-    pdf.output(output_pdf)
+def generate_deltahedron_with_ribs_only_pngs():
+    for orientation_code in DeltaProt.orientation_codes:
+        deltahedron = Deltahedron.choose_deltahedron_by_rib_number(
+            int(orientation_code[1]), edge_length=11
+        )
+        transform_matrix = np.eye(4)
+        output_path = f"/home/tadas/code/deltaproteinsBristol/deltaprot_deltahedron_fig_data/{orientation_code}_ribs_only.png"
+        print(
+            f"Generating deltahedron with ribs only PNG for {orientation_code} → {output_path}"
+        )
+        ribs = deltaprot_helper.orientation_codes_sorted_ribs[
+            orientation_code.replace("_", ".")
+        ]
+        generate_deltahedron_with_ribs_only_png(
+            deltahedron=deltahedron,
+            ribs=ribs,
+            output_path=output_path,
+            transform_matrix=transform_matrix,
+        )
 
 
 if __name__ == "__main__":
-    # generate_deltaprotein_deltahedron_pngs()
-    assemble_deltaprots_pdf(
-        "/home/tadas/code/deltaproteinsBristol/deltaprot_deltahedron_fig_data",
-        "/home/tadas/code/deltaproteinsBristol/deltaprot_deltahedron_fig_data",
-    )
+    generate_deltahedron_only_pngs()
+    generate_deltahedron_with_ribs_only_pngs()
+    generate_full_deltaprot_pngs()
