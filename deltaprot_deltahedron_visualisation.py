@@ -204,7 +204,7 @@ def setup_rendering_camera(deltahedron):
     cmd.bg_color("white")
     cmd.set("ray_opaque_background", 0)
     cmd.set("antialias", 2)
-    cmd.set("ray_shadows", 1)
+    cmd.set("ray_shadows", 0)
     cmd.set("ray_trace_mode", 1)
 
     if hasattr(deltahedron, "name"):
